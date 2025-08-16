@@ -1,26 +1,20 @@
-// src/relay/innuendod.cpp
-
+#include "EventLoop.hpp"
+#include "TorInstance.hpp"
 #include <iostream>
-#include <csignal>
-#include <atomic>
 
-#include "tor/TorInstance.h"
+int main() {
+    EventLoop loop;
 
-std::atomic<bool> running = true;
+    // Construct TorInstance with default SOCKS proxy
+    TorInstance tor(loop, "127.0.0.1", 9050);
+    tor.start();
 
-void signal_handler(int sig) {
-    if (sig == SIGINT || sig == SIGTERM)
-        running = false;
-}
+    std::cout << "[Relay] Innuendo relay daemon started.\n";
 
-int main(int argc, char** argv) {
-    std::signal(SIGINT, signal_handler);
-    std::signal(SIGTERM, signal_handler);
+    // Run the event loop until explicitly stopped
+    loop.run();
 
-    std::cout << "[innuendod] Starting Tor hidden service..." << std::endl;
-
-    // TODO: Implement an innuendo relay
-
+    std::cout << "[Relay] Exiting.\n";
     return 0;
 }
 
