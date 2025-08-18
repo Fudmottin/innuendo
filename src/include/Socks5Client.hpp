@@ -1,23 +1,25 @@
+// src/include/Socks5Client.hpp
+
 #pragma once
-#include "EventLoop.hpp"
 #include <boost/asio.hpp>
 #include <string>
-#include <vector>
 
 class Socks5Client {
 public:
-    Socks5Client(EventLoop& loop, std::string host, unsigned short port) noexcept;
-    ~Socks5Client();
+    Socks5Client(boost::asio::io_context& ioc,
+                 std::string socks_host,
+                 unsigned short socks_port);
 
+    // Establish TCP connection to SOCKS proxy and perform SOCKS5 connect
+    // to dest_host:dest_port (domain name). Throws on failure.
     void connect_to_destination(const std::string& dest_host, unsigned short dest_port);
-    void write_some(const std::string& data);
-    std::string read_some(std::size_t max_bytes);
-    bool is_open() const noexcept {
-        return socket_.is_open();  // socket_ is a boost::asio::ip::tcp::socket
-    }
+
+    // Write and read convenience methods (throw on error)
+    std::size_t write_some(const std::string& data);
+    std::string read_some(std::size_t max_bytes = 4096);
 
 private:
-    EventLoop& loop_;
+    boost::asio::io_context& ioc_;
     boost::asio::ip::tcp::socket socket_;
     std::string socks_host_;
     unsigned short socks_port_;
