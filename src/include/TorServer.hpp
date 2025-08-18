@@ -2,21 +2,29 @@
 
 #pragma once
 #include "TorInstance.hpp"
+#include <boost/asio.hpp>
 #include <string>
+#include <optional>
 
 class TorServer {
 public:
-    TorServer(TorInstance& tor, const std::string& service_dir);
+    TorServer(TorInstance& tor, unsigned short port, const std::string& service_dir);
     ~TorServer();
 
-    void start();
-    void stop();
+    TorServer(const TorServer&) = delete;
+    TorServer& operator=(const TorServer&) = delete;
+
+    void start();  // starts hidden service, creates acceptor
+    void stop();   // stops acceptor and service
+
+    // Blocking accept
+    std::optional<boost::asio::ip::tcp::socket> accept_connection();
 
     std::string onion_address() const;
+    unsigned short port() const;
 
 private:
-    TorInstance& tor;
-    std::string service_dir;
-    std::string onion;
+    struct Impl;
+    std::unique_ptr<Impl> impl;
 };
 

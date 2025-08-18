@@ -2,30 +2,40 @@
 
 #include "TorInstance.hpp"
 #include "TorServer.hpp"
+#include <boost/asio.hpp>
 #include <iostream>
+#include <vector>
 #include <csignal>
 
-TorServer* g_server = nullptr;
-
-void handle_signal(int) {
-    if (g_server) g_server->stop();
-    std::exit(0);
-}
+volatile std::sig_atomic_t g_quit = 0;
+void signal_handler(int) { g_quit = 1; }
 
 int main() {
-    TorInstance tor;           // Uses 127.0.0.1:9050
-    TorServer server(tor, 1440, "/opt/homebrew/var/lib/tor/innuendod");
+    std::signal(SIGINT, signal_handler);
 
-    g_server = &server;
-    std::signal(SIGINT, handle_signal);
+    TorInstance tor;
+    tor.start();
 
-    if (!server.start()) return 1;
+    TorServer server(tor, 2000, "/opt/homebrew/var/lib/tor/innuendod");
+    server.start();
 
-    std::cout << "[innuendod] Listening on port 1440 (foreground, CTRL-C to exit)\n";
+    std::cout << "[main] Echo server running at "
+              << server.onion_address() << ":" << server.port()
+              << " (Ctrl-C to quit)\n";
 
-    // Loop to accept messages or just idle
-    while (true) {
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+    while (!g_quit) {
+        auto sock_opt = server.accept_connection();
+        if (sock_opt) {
+            auto& sock = *sock_opt;
+            std::vector<char> buf(4096);
+            boost::system::error_code ec;
+            std::size_t n = sock.read_some(boost::asio::buffer(buf), ec);
+            if (!ec && n > 0)
+                boost::asio::write(sock, boost::asio::buffer(buf.data(), n));
+        }
     }
+
+    server.stop();
+    tor.stop();
 }
 

@@ -1,97 +1,59 @@
 // src/core/TorServer.cpp
 
 #include "TorServer.hpp"
-#include <stdexcept>
+#include <iostream>
+#include <thread>
 
-TorServer::TorServer(TorInstance& tor, const std::string& service_dir)
-    : tor(tor), service_dir(service_dir) {}
+struct TorServer::Impl {
+    TorInstance& tor;
+    unsigned short service_port;
+    std::string service_dir;
+    std::string onion = "stub2000.onion"; // stub, or read from file
+    boost::asio::io_context ioc;
+    boost::asio::ip::tcp::acceptor acceptor{ioc};
+    bool running = false;
 
-TorServer::~TorServer() {
-    stop();
-}
+    Impl(TorInstance& t, unsigned short p, const std::string& dir)
+        : tor(t), service_port(p), service_dir(dir) {}
+};
+
+TorServer::TorServer(TorInstance& tor, unsigned short port, const std::string& service_dir)
+    : impl(std::make_unique<Impl>(tor, port, service_dir)) {}
+
+TorServer::~TorServer() { stop(); }
 
 void TorServer::start() {
-    // TODO: initialize hidden service with TorInstance
-    // onion = ...;
+    if (impl->running) return;
+
+    std::cout << "[TorServer] Starting hidden service at " << impl->onion
+              << ":" << impl->service_port << "\n";
+
+    boost::asio::ip::tcp::endpoint ep(boost::asio::ip::tcp::v4(), impl->service_port);
+    impl->acceptor.open(ep.protocol());
+    impl->acceptor.set_option(boost::asio::socket_base::reuse_address(true));
+    impl->acceptor.bind(ep);
+    impl->acceptor.listen();
+
+    impl->running = true;
 }
 
 void TorServer::stop() {
-    // TODO: tear down hidden service
+    if (!impl->running) return;
+    boost::system::error_code ec;
+    impl->acceptor.close(ec);
+    impl->running = false;
+    std::cout << "[TorServer] Hidden service stopped\n";
 }
 
-std::string TorServer::onion_address() const {
-    return onion;
+std::optional<boost::asio::ip::tcp::socket> TorServer::accept_connection() {
+    if (!impl->running) return std::nullopt;
+    boost::asio::ip::tcp::socket sock(impl->ioc);
+    boost::system::error_code ec;
+    impl->acceptor.accept(sock, ec);
+    if (ec) return std::nullopt;
+    return sock;
 }
 
-/*
-#include "TorServer.hpp"
-#include <iostream>
-#include <fstream>
-#include <filesystem>
-
-TorServer::TorServer(TorInstance& tor,
-                     unsigned short virt_port,
-                     std::string hs_dir)
-    : tor_(tor),
-      virt_port_(virt_port),
-      hs_dir_(std::move(hs_dir)),
-      running_(false) {}
-
-bool TorServer::start() {
-    namespace fs = std::filesystem;
-    running_ = true;
-
-    try {
-        std::cout << "[TorServer] Starting hidden service...\n";
-        std::string add_cmd;
-        if (!hs_dir_.empty()) {
-            fs::path hs_path = hs_dir_;
-
-            if (fs::exists(hs_path / "private_key")) {
-                std::ifstream key_file(hs_path / "private_key");
-                std::string key((std::istreambuf_iterator<char>(key_file)),
-                                std::istreambuf_iterator<char>());
-                add_cmd = "ADD_ONION " + key +
-                          " Port=" + std::to_string(virt_port_) + "\r\n";
-                std::cout << "[TorServer] Reusing existing hidden service key\n";
-            } else {
-                fs::create_directories(hs_path);
-                add_cmd = "ADD_ONION NEW:ED25519-V3 Port=" +
-                          std::to_string(virt_port_) + "\r\n";
-                std::cout << "[TorServer] Creating new hidden service\n";
-            }
-        } else {
-            add_cmd = "ADD_ONION NEW:ED25519-V3 Port=" +
-                      std::to_string(virt_port_) + "\r\n";
-            std::cout << "[TorServer] Creating ephemeral hidden service\n";
-        }
-
-        tor_.send_control_command(add_cmd, [&](const std::string& line) {
-            std::cout << "[TorServer] Tor reply: " << line << "\n";
-            if (line.find("ServiceID=") != std::string::npos) {
-                onion_address_ = line.substr(line.find("ServiceID=") + 10, 56);
-            }
-            if (!hs_dir_.empty() && line.find("PrivateKey=") != std::string::npos) {
-                std::ofstream key_out(std::filesystem::path(hs_dir_) / "private_key");
-                key_out << line.substr(line.find("PrivateKey=") + 11);
-            }
-        });
-
-        std::cout << "[TorServer] Hidden service ready: "
-                  << onion_address_ << ".onion\n";
-    } catch (const std::exception& e) {
-        std::cerr << "[TorServer] Exception: " << e.what() << "\n";
-        return false;
-    }
-
-    return true;
-}
-
-void TorServer::stop() {
-    if (running_) {
-        std::cout << "[TorServer] Stopping hidden service (not yet implemented)\n";
-        running_ = false;
-    }
-}
-*/
+std::string TorServer::onion_address() const { return impl->onion; }
+unsigned short TorServer::port() const { return impl->service_port; }
 
