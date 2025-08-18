@@ -12,7 +12,7 @@ endif()
 # Build options
 option(BUILD_GUI   "Build GUI client" OFF)
 option(BUILD_CLI   "Build CLI client" ON)
-option(BUILD_RELAY "Build relay node" ON)
+option(BUILD_RELAY "Build relay node" OFF)
 option(BUILD_TESTS "Build tests" OFF)
 option(EMBED_TOR   "Embed Tor instead of using system daemon" OFF)
 

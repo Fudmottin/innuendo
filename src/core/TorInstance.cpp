@@ -3,17 +3,44 @@
 #include "TorInstance.hpp"
 #include <iostream>
 
-TorInstance::TorInstance(std::string socks_host, unsigned short socks_port) noexcept
-    : socks_host_(std::move(socks_host)), socks_port_(socks_port) {}
+struct TorInstance::Impl {
+    bool running = false;
+    std::string host;
+    int port;
+
+    Impl(std::string h, int p) : host(std::move(h)), port(p) {}
+};
+
+TorInstance::TorInstance(const std::string& host, int port)
+    : impl(std::make_unique<Impl>(host, port)) {}
 
 TorInstance::~TorInstance() { stop(); }
 
 void TorInstance::start() {
-    std::cout << "[TorInstance] Using SOCKS proxy " << socks_host_
-              << ":" << socks_port_ << " (assumes Tor daemon is running)\n";
+    if (!impl->running) {
+        std::cout << "[TorInstance] Starting Tor (stub) at " 
+                  << impl->host << ":" << impl->port << "...\n";
+        // TODO: real bootstrap logic
+        impl->running = true;
+    }
 }
 
 void TorInstance::stop() {
-    std::cout << "[TorInstance] Stopping (no action performed)\n";
+    if (impl->running) {
+        std::cout << "[TorInstance] Stopping Tor (stub)...\n";
+        impl->running = false;
+    }
+}
+
+bool TorInstance::is_running() const noexcept {
+    return impl->running;
+}
+
+std::string TorInstance::socks_address() const {
+    return impl->host;
+}
+
+int TorInstance::socks_port() const {
+    return impl->port;
 }
 

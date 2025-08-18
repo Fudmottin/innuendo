@@ -2,25 +2,28 @@
 
 #pragma once
 #include <string>
+#include <memory>
 
 class TorInstance {
 public:
-    // Default Tor SOCKS proxy
-    static constexpr const char* DEFAULT_SOCKS_HOST = "127.0.0.1";
-    static constexpr unsigned short DEFAULT_SOCKS_PORT = 9050;
-
-    TorInstance(std::string socks_host = DEFAULT_SOCKS_HOST,
-                unsigned short socks_port = DEFAULT_SOCKS_PORT) noexcept;
+    // optional host and port
+    TorInstance(const std::string& host = "127.0.0.1", int port = 9050);
     ~TorInstance();
 
-    void start(); // logs what we will do
-    void stop();  // logs and tidy up (no-op for now)
+    TorInstance(const TorInstance&) = delete;
+    TorInstance& operator=(const TorInstance&) = delete;
 
-    std::string socks_host() const noexcept { return socks_host_; }
-    unsigned short socks_port() const noexcept { return socks_port_; }
+    void start();   // bootstrap Tor
+    void stop();    // clean shutdown
+
+    bool is_running() const noexcept;
+
+    // Generic interface: Tor paths, socks address, etc.
+    std::string socks_address() const;
+    int socks_port() const;
 
 private:
-    std::string socks_host_;
-    unsigned short socks_port_;
+    struct Impl;
+    std::unique_ptr<Impl> impl;
 };
 
