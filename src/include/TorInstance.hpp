@@ -5,8 +5,12 @@
 
 class TorInstance {
 public:
-    // socks_host and socks_port are where the Tor daemon is listening
-    TorInstance(std::string socks_host = "127.0.0.1", unsigned short socks_port = 9050) noexcept;
+    // Default Tor SOCKS proxy
+    static constexpr const char* DEFAULT_SOCKS_HOST = "127.0.0.1";
+    static constexpr unsigned short DEFAULT_SOCKS_PORT = 9050;
+
+    TorInstance(std::string socks_host = DEFAULT_SOCKS_HOST,
+                unsigned short socks_port = DEFAULT_SOCKS_PORT) noexcept;
     ~TorInstance();
 
     void start(); // logs what we will do
