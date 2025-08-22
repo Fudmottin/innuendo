@@ -31,8 +31,8 @@ static std::optional<std::string> get_input(const char* prompt) {
 
 int main() try {
     const std::string onion =
-        "nb5iaajanzfty33y2tkuengk37gbjjeylr5gtwnkhkxkrls6k33gvkad.onion";
-    const unsigned short onion_port = 2000;
+        "qyhw7f6jynynrcyffeploro2bnbssab3ed5few2nb3joj2sap2vinsid.onion";
+    const unsigned short onion_port = 1440;
 
     TorInstance tor;
     tor.start();

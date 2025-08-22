@@ -1,8 +1,8 @@
 // src/core/TorServer.cpp
 
-// src/core/TorServer.cpp
 #include "TorServer.hpp"
 #include <iostream>
+#include <fstream>
 
 struct TorServer::Impl {
     boost::asio::io_context& io;
@@ -31,24 +31,26 @@ TorServer::~TorServer() { stop(); }
 void TorServer::start() {
     if (impl->running) return;
 
-    std::cout << "[TorServer] Starting hidden service at " << impl->onion
-              << ":" << impl->service_port << "\n";
+    // Set up local TCP acceptor
+    boost::asio::ip::tcp::endpoint ep(boost::asio::ip::tcp::v4(), impl->service_port);
+    impl->acceptor.open(ep.protocol());
+    impl->acceptor.set_option(boost::asio::socket_base::reuse_address(true));
+    impl->acceptor.bind(ep);
+    impl->acceptor.listen();
 
-    tcp::endpoint ep(boost::asio::ip::make_address("127.0.0.1"),
-                     impl->service_port);
-    boost::system::error_code ec;
-
-    impl->acceptor.open(ep.protocol(), ec);
-    if (ec) throw std::runtime_error("open failed: " + ec.message());
-
-    impl->acceptor.set_option(boost::asio::socket_base::reuse_address(true), ec);
-    impl->acceptor.bind(ep, ec);
-    if (ec) throw std::runtime_error("bind failed: " + ec.message());
-
-    impl->acceptor.listen(boost::asio::socket_base::max_listen_connections, ec);
-    if (ec) throw std::runtime_error("listen failed: " + ec.message());
+    // Read onion address from Tor hidden service directory
+    std::string hostname_path = impl->service_dir + "/hostname";
+    std::ifstream hostfile(hostname_path);
+    if (hostfile) {
+        std::getline(hostfile, impl->onion);
+    } else {
+        std::cerr << "[TorServer] Warning: could not read "
+                  << hostname_path << ". Is Tor configured with HiddenServiceDir?\n";
+    }
 
     impl->running = true;
+    std::cout << "[TorServer] Hidden service running at " << impl->onion
+              << ":" << impl->service_port << "\n";
 }
 
 void TorServer::stop() noexcept {

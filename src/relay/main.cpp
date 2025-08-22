@@ -1,6 +1,5 @@
 // src/relay/main.cpp
 
-// src/relay/main.cpp
 #include "TorInstance.hpp"
 #include "TorServer.hpp"
 
@@ -58,7 +57,7 @@ int main() try {
     tor.start();
 
     // Start hidden service
-    TorServer server(io, tor, 2000, "/opt/homebrew/var/lib/tor/innuendod");
+    TorServer server(io, tor, 1440, "/var/lib/tor/innuendod");
     server.start();
 
     std::cout << "[main] Echo server running at "

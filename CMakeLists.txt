@@ -4,32 +4,47 @@ project(innuendo LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Suppress CMP0167 warning (use FindBoost even though deprecated)
-if(POLICY CMP0167)
-    cmake_policy(SET CMP0167 OLD)
-endif()
-
+# -------------------------------
 # Build options
+# -------------------------------
 option(BUILD_GUI   "Build GUI client" OFF)
 option(BUILD_CLI   "Build CLI client" ON)
 option(BUILD_RELAY "Build relay node" ON)
 option(BUILD_TESTS "Build tests" OFF)
 option(EMBED_TOR   "Embed Tor instead of using system daemon" OFF)
 
-# Homebrew prefixes on macOS
+# -------------------------------
+# OS-specific paths & libraries
+# -------------------------------
 if(APPLE)
-    list(APPEND CMAKE_PREFIX_PATH
-        /opt/homebrew
-        /usr/local
-    )
+    # Determine architecture
+    if(CMAKE_OSX_ARCHITECTURES MATCHES "arm64")
+        set(HOMEBREW_PREFIX "/opt/homebrew")
+    else()
+        set(HOMEBREW_PREFIX "/usr/local")
+    endif()
+    list(APPEND CMAKE_PREFIX_PATH "${HOMEBREW_PREFIX}")
+elseif(UNIX)
+    # Linux default prefix
+    set(HOMEBREW_PREFIX "/usr")
 endif()
 
-# Boost
-find_package(Boost 1.81 REQUIRED COMPONENTS system)
+# -------------------------------
+# Boost 
+# -------------------------------
+
+find_package(Boost CONFIG REQUIRED)
+if(NOT Boost_FOUND)
+    message(FATAL_ERROR "Boost not found. Please install Boost or adjust BOOST_ROOT")
+endif()
+
 message(STATUS "Boost include dirs: ${Boost_INCLUDE_DIRS}")
 message(STATUS "Boost libraries: ${Boost_LIBRARIES}")
 
-# Readline (manual detection, avoids missing Config warning)
+# -------------------------------
+# Readline
+# -------------------------------
+
 if(APPLE)
     list(APPEND CMAKE_PREFIX_PATH
         /opt/homebrew/opt/readline
@@ -58,9 +73,11 @@ else()
     set(Readline_FOUND FALSE)
 endif()
 
+# -------------------------------
+# FetchContent (optional deps)
+# -------------------------------
 include(FetchContent)
 
-# Optional deps
 if(BUILD_GUI)
     add_subdirectory(JUCE)
 endif()
@@ -83,7 +100,9 @@ if(EMBED_TOR)
     FetchContent_MakeAvailable(tor)
 endif()
 
+# -------------------------------
 # Core library
+# -------------------------------
 set(INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/include)
 file(GLOB_RECURSE CORE_SRC CONFIGURE_DEPENDS src/core/*.cpp src/core/*.h)
 
@@ -95,7 +114,9 @@ target_include_directories(innuendo_core PUBLIC
 target_link_libraries(innuendo_core PUBLIC ${Boost_LIBRARIES})
 target_compile_features(innuendo_core PUBLIC cxx_std_20)
 
+# -------------------------------
 # CLI
+# -------------------------------
 if(BUILD_CLI)
     file(GLOB_RECURSE CLI_SRC CONFIGURE_DEPENDS src/cli/*.cpp src/cli/*.h)
     if(CLI_SRC)
@@ -110,7 +131,9 @@ if(BUILD_CLI)
     endif()
 endif()
 
+# -------------------------------
 # Relay
+# -------------------------------
 if(BUILD_RELAY)
     file(GLOB_RECURSE RELAY_SRC CONFIGURE_DEPENDS src/relay/*.cpp src/relay/*.h)
     if(RELAY_SRC)
@@ -121,7 +144,9 @@ if(BUILD_RELAY)
     endif()
 endif()
 
+# -------------------------------
 # GUI
+# -------------------------------
 if(BUILD_GUI)
     file(GLOB_RECURSE GUI_SRC CONFIGURE_DEPENDS src/gui/*.cpp src/gui/*.h)
     if(GUI_SRC)
@@ -136,7 +161,9 @@ if(BUILD_GUI)
     endif()
 endif()
 
+# -------------------------------
 # Tests
+# -------------------------------
 if(BUILD_TESTS)
     enable_testing()
     file(GLOB_RECURSE TEST_SRC CONFIGURE_DEPENDS src/test/*.cpp src/test/*.h)
