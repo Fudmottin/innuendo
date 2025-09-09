@@ -1,5 +1,4 @@
 // src/cli/main.cpp
-
 #include "TorInstance.hpp"
 #include "TorClient.hpp"
 
@@ -10,11 +9,12 @@
 #include <thread>
 #include <atomic>
 #include <optional>
+#include <csignal>
 
 // --- RAII wrappers ---
-
 struct NcursesSession {
     NcursesSession() {
+        setlocale(LC_ALL, ""); // Unicode
         initscr();
         cbreak();
         noecho();
@@ -30,16 +30,21 @@ public:
     Window(int h, int w, int y, int x) : w_(newwin(h, w, y, x)) {}
     ~Window() { delwin(w_); }
     operator WINDOW*() const { return w_; }
+    void resize(int h, int w, int y, int x) {
+        wresize(w_, h, w);
+        mvwin(w_, y, x);
+        werase(w_);
+        box(w_, 0, 0);
+        wrefresh(w_);
+    }
 };
 
-// --- globals for communication ---
-
+// --- globals ---
 std::mutex q_mutex;
 std::queue<std::string> incoming;
 std::atomic<bool> running{true};
 
 // --- network thread ---
-
 void network_loop(TorClient& client) {
     try {
         while (running) {
@@ -56,7 +61,9 @@ void network_loop(TorClient& client) {
     }
 }
 
-// --- main program ---
+// --- resize handler ---
+std::atomic<bool> resized{false};
+void handle_winch(int) { resized = true; }
 
 int main() try {
     const std::string onion =
@@ -70,6 +77,7 @@ int main() try {
     client.connect();
 
     NcursesSession session;
+    signal(SIGWINCH, handle_winch);
 
     int rows, cols;
     getmaxyx(stdscr, rows, cols);
@@ -80,9 +88,20 @@ int main() try {
     std::thread net(network_loop, std::ref(client));
 
     while (running) {
+        // handle resize
+        if (resized) {
+            getmaxyx(stdscr, rows, cols);
+            msgwin.resize(rows - 3, cols, 0, 0);
+            inputwin.resize(3, cols, rows - 3, 0);
+            resized = false;
+        }
+
         // draw input box
-        wclear(inputwin);
+        werase(inputwin);
         box(inputwin, 0, 0);
+        wrefresh(inputwin);
+
+        nodelay(inputwin, false); // blocking input
         char buf[256];
         mvwgetnstr(inputwin, 1, 1, buf, sizeof(buf) - 1);
         std::string line(buf);
