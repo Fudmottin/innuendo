@@ -24,7 +24,9 @@ if(CLI_SRC)
 
         target_include_directories(innuendo PRIVATE ${NCURSES_PREFIX}/include)
         target_link_directories(innuendo PRIVATE ${NCURSES_PREFIX}/lib)
-        target_link_libraries(innuendo PRIVATE ncursesw)
+
+        # Link ncursesw + panelw (wide-char aware)
+        target_link_libraries(innuendo PRIVATE ncursesw panelw)
         target_compile_definitions(innuendo PRIVATE USE_NCURSESW)
 
         message(STATUS "Using Homebrew ncurses from ${NCURSES_PREFIX}")
@@ -32,7 +34,9 @@ if(CLI_SRC)
     else() # Linux and others
         find_package(Curses REQUIRED)
         target_include_directories(innuendo PRIVATE ${CURSES_INCLUDE_DIR})
-        target_link_libraries(innuendo PRIVATE ${CURSES_LIBRARIES})
+
+        # Link ncursesw + panel (system usually provides both)
+        target_link_libraries(innuendo PRIVATE ${CURSES_LIBRARIES} panel)
         target_compile_definitions(innuendo PRIVATE USE_NCURSESW)
     endif()
 
@@ -41,6 +45,19 @@ if(CLI_SRC)
         target_compile_options(innuendo PRIVATE /utf-8)
     else()
         target_compile_options(innuendo PRIVATE -finput-charset=UTF-8 -fexec-charset=UTF-8)
+    endif()
+
+    # --- post-build check for linked ncurses/panel libraries ---
+    if(APPLE)
+        add_custom_command(TARGET innuendo POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E echo '=== Linked libraries (macOS) ==='
+            COMMAND otool -L $<TARGET_FILE:innuendo>
+        )
+    elseif(UNIX)
+        add_custom_command(TARGET innuendo POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E echo '=== Linked libraries (Linux) ==='
+            COMMAND ldd $<TARGET_FILE:innuendo>
+        )
     endif()
 endif()
 

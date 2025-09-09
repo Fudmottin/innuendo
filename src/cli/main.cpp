@@ -4,6 +4,7 @@
 #include "TorClient.hpp"
 
 #include <ncursesw/ncurses.h>
+#include <panel.h>
 #include <string>
 #include <queue>
 #include <mutex>
@@ -21,6 +22,7 @@ struct NcursesSession {
         noecho();
         keypad(stdscr, TRUE);
         curs_set(1);
+        start_color();
     }
     ~NcursesSession() { endwin(); }
 };
@@ -66,11 +68,16 @@ int main() try {
     int rows, cols;
     getmaxyx(stdscr, rows, cols);
 
-    WINDOW* msgwin = newwin(rows - 3, cols, 0, 0);
+    // --- create windows ---
+    WINDOW* msgwin   = newwin(rows - 3, cols, 0, 0);
     WINDOW* inputwin = newwin(3, cols, rows - 3, 0);
-    scrollok(msgwin, TRUE);
 
-    nodelay(inputwin, TRUE);  // non-blocking input
+    // --- wrap in panels ---
+    PANEL* msgpanel   = new_panel(msgwin);
+    PANEL* inputpanel = new_panel(inputwin);
+
+    scrollok(msgwin, TRUE);
+    nodelay(inputwin, TRUE);
     keypad(inputwin, TRUE);
 
     std::thread net(network_loop, std::ref(client));
@@ -85,11 +92,14 @@ int main() try {
             mvwin(msgwin, 0, 0);
             wresize(inputwin, 3, cols);
             mvwin(inputwin, rows - 3, 0);
+
             werase(msgwin);
             werase(inputwin);
             box(inputwin, 0, 0);
-            wrefresh(msgwin);
-            wrefresh(inputwin);
+
+            update_panels();
+            doupdate();
+
             resized = false;
         }
 
@@ -100,7 +110,7 @@ int main() try {
                 if (input_buffer == "/quit") {
                     running = false;
                     input_buffer.clear();
-                    break; // exit inner while
+                    break;
                 }
                 if (!input_buffer.empty()) {
                     try { client.write_some(input_buffer + "\n"); }
@@ -129,25 +139,30 @@ int main() try {
                 wprintw(msgwin, "%s\n", incoming.front().c_str());
                 incoming.pop();
             }
-            wrefresh(msgwin);
         }
 
-        // --- redraw input buffer and cursor ---
+        // --- redraw input window ---
         werase(inputwin);
         box(inputwin, 0, 0);
         mvwprintw(inputwin, 1, 1, "%s", input_buffer.c_str());
-        wmove(inputwin, 1, 1 + input_buffer.size()); // cursor in input window
-        wrefresh(inputwin);
+        wmove(inputwin, 1, 1 + input_buffer.size());
+
+        // --- update panels ---
+        update_panels();
+        doupdate();
 
         std::this_thread::sleep_for(std::chrono::milliseconds(30));
     }
 
     running = false;
     net.join();
+
+    del_panel(msgpanel);
+    del_panel(inputpanel);
     delwin(msgwin);
     delwin(inputwin);
-    tor.stop();
 
+    tor.stop();
     return 0;
 
 } catch (const std::exception& e) {
