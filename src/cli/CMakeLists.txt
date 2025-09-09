@@ -2,35 +2,41 @@
 
 file(GLOB_RECURSE CLI_SRC CONFIGURE_DEPENDS *.cpp *.h)
 
-# Homebrew ncurses prefix on macOS
-if(APPLE)
-    list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew/opt/ncurses")
-endif()
-
-# Find wide-character ncurses (ncursesw)
-find_path(NCURSESW_INCLUDE_DIR ncursesw/ncurses.h
-    HINTS /opt/homebrew/include /usr/include /usr/local/include
-)
-find_library(NCURSESW_LIBRARY ncursesw
-    HINTS /opt/homebrew/lib /usr/lib /usr/local/lib
-)
-
-if(NCURSESW_INCLUDE_DIR AND NCURSESW_LIBRARY)
-    message(STATUS "Found ncursesw: ${NCURSESW_INCLUDE_DIR} ${NCURSESW_LIBRARY}")
-else()
-    message(FATAL_ERROR "ncursesw not found. Please install via 'brew install ncurses' on macOS or your package manager on Linux")
-endif()
-
 if(CLI_SRC)
     add_executable(innuendo ${CLI_SRC})
-    target_include_directories(innuendo PRIVATE ${INCLUDE_DIR} ${NCURSESW_INCLUDE_DIR})
     target_compile_features(innuendo PRIVATE cxx_std_20)
-    target_link_libraries(innuendo PRIVATE innuendo_core ${NCURSESW_LIBRARY})
+    target_link_libraries(innuendo PRIVATE innuendo_core)
 
-    # Macro for code to wrap ncursesw calls
-    target_compile_definitions(innuendo PRIVATE USE_NCURSESW)
+    # --- Locate ncursesw ---
+    if(APPLE)
+        # Prefer Homebrew ncurses (Apple Silicon or Intel)
+        set(NCURSES_PREFIX "")
+        foreach(prefix /opt/homebrew /usr/local)
+            if(EXISTS "${prefix}/opt/ncurses/include/ncursesw/ncurses.h")
+                set(NCURSES_PREFIX "${prefix}/opt/ncurses")
+                break()
+            endif()
+        endforeach()
 
-    # Unicode / wide-character support
+        if(NCURSES_PREFIX STREQUAL "")
+            message(FATAL_ERROR "Homebrew ncurses not found. Install with: brew install ncurses")
+        endif()
+
+        target_include_directories(innuendo PRIVATE ${NCURSES_PREFIX}/include)
+        target_link_directories(innuendo PRIVATE ${NCURSES_PREFIX}/lib)
+        target_link_libraries(innuendo PRIVATE ncursesw)
+        target_compile_definitions(innuendo PRIVATE USE_NCURSESW)
+
+        message(STATUS "Using Homebrew ncurses from ${NCURSES_PREFIX}")
+
+    else() # Linux and others
+        find_package(Curses REQUIRED)
+        target_include_directories(innuendo PRIVATE ${CURSES_INCLUDE_DIR})
+        target_link_libraries(innuendo PRIVATE ${CURSES_LIBRARIES})
+        target_compile_definitions(innuendo PRIVATE USE_NCURSESW)
+    endif()
+
+    # --- Encoding options ---
     if(MSVC)
         target_compile_options(innuendo PRIVATE /utf-8)
     else()
