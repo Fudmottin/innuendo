@@ -9,9 +9,12 @@
 #include <thread>
 #include <vector>
 #include <memory>
+#include <mutex>
 
 namespace asio = boost::asio;
 using tcp = asio::ip::tcp;
+
+static std::mutex cout_mutex;
 
 // Echo session
 class Session : public std::enable_shared_from_this<Session> {
@@ -29,7 +32,15 @@ private:
             asio::buffer(buf_),
             asio::bind_executor(strand_,
                 [self](boost::system::error_code ec, std::size_t n) {
-                    if (!ec) self->do_write(n);
+                    if (!ec) {
+                        {
+                            std::lock_guard<std::mutex> lock(cout_mutex);
+                            std::cout << "[echo] "
+                                      << std::string(self->buf_.data(), n)
+                                      << std::flush;
+                        }
+                        self->do_write(n);
+                    }
                 }));
     }
 
