@@ -1,4 +1,5 @@
 // src/cli/main.cpp
+
 #include "TorInstance.hpp"
 #include "TorClient.hpp"
 
@@ -8,51 +9,35 @@
 #include <mutex>
 #include <thread>
 #include <atomic>
-#include <optional>
 #include <csignal>
+#include <locale>
 
-// --- RAII wrappers ---
+// --- RAII for ncurses init/cleanup ---
 struct NcursesSession {
     NcursesSession() {
-        setlocale(LC_ALL, ""); // Unicode
+        setlocale(LC_ALL, ""); // Unicode support
         initscr();
         cbreak();
         noecho();
-        keypad(stdscr, true);
+        keypad(stdscr, TRUE);
         curs_set(1);
     }
     ~NcursesSession() { endwin(); }
-};
-
-class Window {
-    WINDOW* w_;
-public:
-    Window(int h, int w, int y, int x) : w_(newwin(h, w, y, x)) {}
-    ~Window() { delwin(w_); }
-    operator WINDOW*() const { return w_; }
-    void resize(int h, int w, int y, int x) {
-        wresize(w_, h, w);
-        mvwin(w_, y, x);
-        werase(w_);
-        box(w_, 0, 0);
-        wrefresh(w_);
-    }
 };
 
 // --- globals ---
 std::mutex q_mutex;
 std::queue<std::string> incoming;
 std::atomic<bool> running{true};
+std::atomic<bool> resized{false};
 
 // --- network thread ---
 void network_loop(TorClient& client) {
     try {
         while (running) {
             std::string msg = client.read_some(); // blocking
-            {
-                std::lock_guard<std::mutex> lock(q_mutex);
-                incoming.push("peer: " + msg);
-            }
+            std::lock_guard<std::mutex> lock(q_mutex);
+            incoming.push("peer: " + msg);
         }
     } catch (const std::exception& e) {
         std::lock_guard<std::mutex> lock(q_mutex);
@@ -62,7 +47,6 @@ void network_loop(TorClient& client) {
 }
 
 // --- resize handler ---
-std::atomic<bool> resized{false};
 void handle_winch(int) { resized = true; }
 
 int main() try {
@@ -81,50 +65,64 @@ int main() try {
 
     int rows, cols;
     getmaxyx(stdscr, rows, cols);
-    Window msgwin(rows - 3, cols, 0, 0);
-    Window inputwin(3, cols, rows - 3, 0);
-    scrollok(msgwin, true);
+
+    WINDOW* msgwin = newwin(rows - 3, cols, 0, 0);
+    WINDOW* inputwin = newwin(3, cols, rows - 3, 0);
+    scrollok(msgwin, TRUE);
+
+    nodelay(inputwin, TRUE);  // non-blocking input
+    keypad(inputwin, TRUE);
 
     std::thread net(network_loop, std::ref(client));
 
+    std::string input_buffer;
+
     while (running) {
-        // handle resize
+        // --- handle resize ---
         if (resized) {
             getmaxyx(stdscr, rows, cols);
-            msgwin.resize(rows - 3, cols, 0, 0);
-            inputwin.resize(3, cols, rows - 3, 0);
+            wresize(msgwin, rows - 3, cols);
+            mvwin(msgwin, 0, 0);
+            wresize(inputwin, 3, cols);
+            mvwin(inputwin, rows - 3, 0);
+            werase(msgwin);
+            werase(inputwin);
+            box(inputwin, 0, 0);
+            wrefresh(msgwin);
+            wrefresh(inputwin);
             resized = false;
         }
 
-        // draw input box
-        werase(inputwin);
-        box(inputwin, 0, 0);
-        wrefresh(inputwin);
-
-        nodelay(inputwin, false); // blocking input
-        char buf[256];
-        mvwgetnstr(inputwin, 1, 1, buf, sizeof(buf) - 1);
-        std::string line(buf);
-
-        if (line == "/quit") {
-            running = false;
-            break;
-        }
-
-        if (!line.empty()) {
-            wprintw(msgwin, "me: %s\n", line.c_str());
-            wrefresh(msgwin);
-
-            try {
-                client.write_some(line + "\n");
-            } catch (const std::exception& e) {
-                wprintw(msgwin, "[send error] %s\n", e.what());
-                wrefresh(msgwin);
-                running = false;
+        // --- read input (non-blocking) ---
+        int ch = wgetch(inputwin);
+        while (ch != ERR) {
+            if (ch == '\n') {
+                if (input_buffer == "/quit") {
+                    running = false;
+                    input_buffer.clear();
+                    break; // exit inner while
+                }
+                if (!input_buffer.empty()) {
+                    try { client.write_some(input_buffer + "\n"); }
+                    catch (const std::exception& e) {
+                        std::lock_guard<std::mutex> lock(q_mutex);
+                        incoming.push(std::string("[send error] ") + e.what());
+                        running = false;
+                        break;
+                    }
+                    std::lock_guard<std::mutex> lock(q_mutex);
+                    incoming.push("me: " + input_buffer);
+                    input_buffer.clear();
+                }
+            } else if (ch == KEY_BACKSPACE || ch == 127) {
+                if (!input_buffer.empty()) input_buffer.pop_back();
+            } else if (isprint(ch)) {
+                input_buffer.push_back(static_cast<char>(ch));
             }
+            ch = wgetch(inputwin);
         }
 
-        // display received messages
+        // --- display incoming messages ---
         {
             std::lock_guard<std::mutex> lock(q_mutex);
             while (!incoming.empty()) {
@@ -133,11 +131,23 @@ int main() try {
             }
             wrefresh(msgwin);
         }
+
+        // --- redraw input buffer and cursor ---
+        werase(inputwin);
+        box(inputwin, 0, 0);
+        mvwprintw(inputwin, 1, 1, "%s", input_buffer.c_str());
+        wmove(inputwin, 1, 1 + input_buffer.size()); // cursor in input window
+        wrefresh(inputwin);
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
     }
 
     running = false;
     net.join();
+    delwin(msgwin);
+    delwin(inputwin);
     tor.stop();
+
     return 0;
 
 } catch (const std::exception& e) {
