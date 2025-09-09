@@ -3,31 +3,60 @@
 #include "TorInstance.hpp"
 #include "TorClient.hpp"
 
-#include <chrono>
-#include <iostream>
-#include <optional>
+#include <ncursesw/ncurses.h>
 #include <string>
+#include <queue>
+#include <mutex>
+#include <thread>
+#include <atomic>
+#include <optional>
 
-#ifdef HAVE_READLINE
-#  include <readline/readline.h>
-#  include <readline/history.h>
-#endif
+// --- RAII wrappers ---
 
-static std::optional<std::string> get_input(const char* prompt) {
-#ifdef HAVE_READLINE
-    char* buf = readline(prompt);
-    if (!buf) return std::nullopt;
-    std::string s(buf);
-    free(buf);
-    if (!s.empty()) add_history(s.c_str());
-    return s;
-#else
-    std::cout << prompt << std::flush;
-    std::string s;
-    if (!std::getline(std::cin, s)) return std::nullopt;
-    return s;
-#endif
+struct NcursesSession {
+    NcursesSession() {
+        initscr();
+        cbreak();
+        noecho();
+        keypad(stdscr, true);
+        curs_set(1);
+    }
+    ~NcursesSession() { endwin(); }
+};
+
+class Window {
+    WINDOW* w_;
+public:
+    Window(int h, int w, int y, int x) : w_(newwin(h, w, y, x)) {}
+    ~Window() { delwin(w_); }
+    operator WINDOW*() const { return w_; }
+};
+
+// --- globals for communication ---
+
+std::mutex q_mutex;
+std::queue<std::string> incoming;
+std::atomic<bool> running{true};
+
+// --- network thread ---
+
+void network_loop(TorClient& client) {
+    try {
+        while (running) {
+            std::string msg = client.read_some(); // blocking
+            {
+                std::lock_guard<std::mutex> lock(q_mutex);
+                incoming.push("peer: " + msg);
+            }
+        }
+    } catch (const std::exception& e) {
+        std::lock_guard<std::mutex> lock(q_mutex);
+        incoming.push(std::string("[network error] ") + e.what());
+        running = false;
+    }
 }
+
+// --- main program ---
 
 int main() try {
     const std::string onion =
@@ -36,36 +65,65 @@ int main() try {
 
     TorInstance tor;
     tor.start();
+
     TorClient client(tor, onion, onion_port);
-
-    std::cout << "[main] Establishing circuit and connecting to onion...\n";
     client.connect();
-    std::cout << "[main] Connected. Type text and press Enter to send. Type 'quit' to exit.\n";
 
-    while (true) {
-        auto maybe = get_input("tor-echo> ");
-        if (!maybe) {
-            std::cout << "\n[main] EOF, exiting.\n";
+    NcursesSession session;
+
+    int rows, cols;
+    getmaxyx(stdscr, rows, cols);
+    Window msgwin(rows - 3, cols, 0, 0);
+    Window inputwin(3, cols, rows - 3, 0);
+    scrollok(msgwin, true);
+
+    std::thread net(network_loop, std::ref(client));
+
+    while (running) {
+        // draw input box
+        wclear(inputwin);
+        box(inputwin, 0, 0);
+        char buf[256];
+        mvwgetnstr(inputwin, 1, 1, buf, sizeof(buf) - 1);
+        std::string line(buf);
+
+        if (line == "/quit") {
+            running = false;
             break;
         }
-        const std::string line = *maybe;
-        if (line == "quit") break;
-        if (line.empty()) continue;
 
-        const auto t0 = std::chrono::steady_clock::now();
-        client.write_some(line + "\n");
-        const std::string reply = client.read_some();
-        const auto t1 = std::chrono::steady_clock::now();
+        if (!line.empty()) {
+            wprintw(msgwin, "me: %s\n", line.c_str());
+            wrefresh(msgwin);
 
-        std::chrono::duration<double> rtt = t1 - t0;
-        std::cout << "Echo: " << reply << " (" << rtt.count() << " s)\n";
+            try {
+                client.write_some(line + "\n");
+            } catch (const std::exception& e) {
+                wprintw(msgwin, "[send error] %s\n", e.what());
+                wrefresh(msgwin);
+                running = false;
+            }
+        }
+
+        // display received messages
+        {
+            std::lock_guard<std::mutex> lock(q_mutex);
+            while (!incoming.empty()) {
+                wprintw(msgwin, "%s\n", incoming.front().c_str());
+                incoming.pop();
+            }
+            wrefresh(msgwin);
+        }
     }
 
+    running = false;
+    net.join();
     tor.stop();
     return 0;
-}
-catch (const std::exception& e) {
-    std::cerr << "[ERROR] " << e.what() << '\n';
-    return 2;
+
+} catch (const std::exception& e) {
+    endwin();
+    fprintf(stderr, "[FATAL] %s\n", e.what());
+    return 1;
 }
 
